@@ -122,7 +122,7 @@ fn find_crossings_from_average(v: &ColorLine) -> (bool,Vec<usize>){
         cur = true;
     }
     let buf = max(3,((cur_stat.1 -cur_stat.0) as f32 * 0.04) as u8);
-    let mut range = [cur_stat.2-buf,cur_stat.2+buf];
+    let mut range = [cur_stat.2.saturating_sub(buf),cur_stat.2.saturating_add(buf)];
 
     let mut num = 0;
     let mut slc = v.slice_size/2;
@@ -171,7 +171,7 @@ fn find_range_buffer(cur: usize,v: &ColorLine) -> [u8;2]{
         avg = v.avg_loc[cur];
     }
     let buf = max(3,((mx -mn) as f32 * 0.04) as u8);
-    let range = [avg-buf,avg+buf];
+    let range = [avg.saturating_sub(buf),avg.saturating_add(buf)];
     return range;
 }
 
