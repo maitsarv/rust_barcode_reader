@@ -37,7 +37,7 @@ pub fn translate_bar_code(bcode: &BarcodeBarArray) -> Option<[u8;13]>{
 
     let mut barcode = [0 as u8;13];
 
-    let mut even_odd : [bool;12] = [false;12];
+    let mut even_odd : [bool;13] = [false;13];
     let mut n = 1;
     let mut valid = true;
 
@@ -71,12 +71,10 @@ pub fn translate_bar_code(bcode: &BarcodeBarArray) -> Option<[u8;13]>{
     if valid {
         let first = find_first_number(&even_odd[2..7]);
         let check = calc_checksum(first,&barcode[1..12]);
-        if check as u8 == barcode[11]{
-            println!("{:?} {:?}, {:?}",first,barcode,check);
+        if check as u8 == barcode[12]{
             barcode[0] = first as u8;
-            Some(barcode)
+            return Some(barcode);
         }
-
     }
     None
 }
