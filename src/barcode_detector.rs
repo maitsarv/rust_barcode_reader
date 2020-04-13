@@ -1,11 +1,20 @@
 use std::cmp::max;
 use std::cmp::min;
+use crate::BarcodeBarArray;
 
+
+/**Implement PixelValue for the image data source.
+    x - pixel position on vertical axis
+    y - pixel position on horizontal axis
+    channel - color channel. red, green on blue.
+    w - width of the image
+**/
 pub trait PixelValue {
     fn get_pixel_value(&self, x: u32, y:u32, channel: usize, w:usize) -> u8;
 }
 
-//Holds info about one pixel line in image
+
+///Holds info about one pixel line in image
 #[derive(Clone, Debug)]
 struct ColorLine {
     avg: u8,
@@ -21,30 +30,37 @@ struct ColorLine {
     slice_size: usize
 }
 
-pub fn process_by_rows_image(img: &dyn PixelValue, dim: (u32,u32),color_channel: usize) -> ([usize;2],[[u8;4];6],[[u8;4];6]){
+/**
+Detects and parses barcode(s) from images.
+Parameters:
+img - object with type that has implemented PixelValue trait.
+dim - width and height of the image
+color_channel - color channel number that is provided to get_pixel_value()
+**/
+pub fn process_image_by_rows(img: &dyn PixelValue, dim: (u32,u32), color_channel: usize) -> Vec<BarcodeBarArray> {
     let step = calculate_row_step(dim.1);
     println!("Dimensions {} X {} STEP: {}", dim.0, dim.1, step);
     let mut y = 0;
     let row_slice_size = 30 as usize;
 
-    let mut found_bar_codes : ([usize;2],[[u8;4];6],[[u8;4];6]) = ([0;2], [[0;4];6], [[0;4];6]);
+    let mut found_bar_codes : Vec<BarcodeBarArray> = Vec::new();
 
     while y < dim.1 {
         let len = dim.0;
         let mut line_sum = 0;
         let mut line = ColorLine {
-                avg: 0,
-                min: 255,
-                max: 0,
-                deg: 0,
-                pos: y,
-                len,
-                values: vec![0 as u8; len as usize],
-                avg_loc : Vec::with_capacity((len as usize /row_slice_size) + 1),
-                min_loc : Vec::with_capacity((len as usize/row_slice_size) + 1),
-                max_loc : Vec::with_capacity((len as usize/row_slice_size) + 1),
-                slice_size: row_slice_size
-            };
+            avg: 0,
+            min: 255,
+            max: 0,
+            deg: 0,
+            pos: y,
+            len,
+            values: vec![0 as u8; len as usize],
+            avg_loc : Vec::with_capacity((len as usize /row_slice_size) + 1),
+            min_loc : Vec::with_capacity((len as usize/row_slice_size) + 1),
+            max_loc : Vec::with_capacity((len as usize/row_slice_size) + 1),
+            slice_size: row_slice_size
+        };
         let mut slc = 0;
         let mut slice_vals = (255,0,0);
         for x in 0..len {
@@ -84,11 +100,15 @@ pub fn process_by_rows_image(img: &dyn PixelValue, dim: (u32,u32),color_channel:
         line.avg = (line_sum / (len) as usize) as u8;
         let a = find_crossings_from_average(&line);
         let bar_code = find_bar_code(&line,&a);
-        if bar_code.0[1] > 0 {
-            println!("{:?} {:?}",line.pos, line.deg);
-            println!("{:?}",bar_code);
-            found_bar_codes = bar_code;
-            break;
+        if bar_code.0[3] > 0 {
+            let mut add = true;
+            if found_bar_codes.len() > 0 {
+                add = !are_barcodes_same(&found_bar_codes.last().unwrap(),&bar_code);
+            }
+            if add {
+                println!("{:?}",bar_code);
+                found_bar_codes.push(bar_code);
+            }
         }
         y += step;
     }
@@ -100,6 +120,21 @@ fn calculate_row_step(y: u32) -> u32{
     let lnst = (y as f64).log10();
     let step = (lnst * 6.0) as u32;
     return step;
+}
+
+fn are_barcodes_same(a : &BarcodeBarArray, b : &BarcodeBarArray) -> bool{
+    let mut i = 0;
+    while i < a.2.len() {
+        let mut j = 0;
+        while j < 4 {
+            if a.2[i][j] != b.2[i][j] {
+                return false;
+            }
+            j += 1;
+        }
+        i += 1
+    }
+    true
 }
 
 fn find_crossings_from_average(v: &ColorLine) -> (bool,Vec<usize>){
@@ -166,9 +201,9 @@ fn find_range_buffer(cur: usize,v: &ColorLine) -> [u8;2]{
     return range;
 }
 
-fn find_bar_code(color_line: &ColorLine, avg_cross : &(bool,Vec<usize>)) -> ([usize;2],[[u8;4];6],[[u8;4];6]){
+fn find_bar_code(color_line: &ColorLine, avg_cross : &(bool,Vec<usize>)) -> BarcodeBarArray{
 
-    let mut bar_code_widths : ([usize;2],[[u8;4];6],[[u8;4];6]) = ([0,0],[[0;4];6],[[0;4];6]);
+    let mut bar_code_widths : BarcodeBarArray = ([0;4],[[0;4];6],[[0;4];6]);
     if avg_cross.1.len() >= 58{
         let mut diffs : Vec<usize> = Vec::with_capacity(avg_cross.1.len()-1);
         let mut f = 0;
@@ -180,7 +215,7 @@ fn find_bar_code(color_line: &ColorLine, avg_cross : &(bool,Vec<usize>)) -> ([us
             f += 1;
         }
         let mut light = avg_cross.0;
-        for t in 2..(avg_cross.1.len()-58) {
+        for t in 2..(avg_cross.1.len()-57) {
             light = !light;
             let f = t-2;
             let rangechange = (diffs[f] as f32 * 0.1) as usize + 2;
@@ -197,7 +232,7 @@ fn find_bar_code(color_line: &ColorLine, avg_cross : &(bool,Vec<usize>)) -> ([us
                         if bar_code_widths.2[5][0] == 0 {
                             continue;
                         }
-                        bar_code_widths.0 = [avg_cross.1[f],avg_cross.1[t+55]];
+                        bar_code_widths.0 = [color_line.pos as usize, color_line.deg as usize, avg_cross.1[f],avg_cross.1[t+55]];
                         return bar_code_widths;
                     }
                 }
