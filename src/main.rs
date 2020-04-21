@@ -6,7 +6,7 @@ use crate::barcode_detector::PixelValue;
 mod barcode_translate;
 mod barcode_detector;
 
-type BarcodeBarArray = ([usize; 4], [[u8; 4]; 6], [[u8; 4]; 6]);
+type BarcodeBarArray = ([usize; 5], [[u8; 4]; 6], [[u8; 4]; 6]);
 
 impl PixelValue for DynamicImage{
     fn get_pixel_value(&self, x: u32, y:u32, channel: usize,  w:usize) -> u8{

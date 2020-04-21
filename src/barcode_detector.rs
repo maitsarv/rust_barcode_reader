@@ -44,23 +44,24 @@ pub fn process_image_by_rows(img: &dyn PixelValue, dim: (u32,u32), color_channel
     let row_slice_size = 30 as usize;
 
     let mut found_bar_codes : Vec<BarcodeBarArray> = Vec::new();
+    let mut partial_bar_codes : Vec<BarcodeBarArray> = Vec::new();
 
     while y < dim.1 {
         let len = dim.0;
         let mut line_sum = 0;
         let mut line = ColorLine {
-            avg: 0,
-            min: 255,
-            max: 0,
-            deg: 0,
-            pos: y,
-            len,
-            values: vec![0 as u8; len as usize],
-            avg_loc : Vec::with_capacity((len as usize /row_slice_size) + 1),
-            min_loc : Vec::with_capacity((len as usize/row_slice_size) + 1),
-            max_loc : Vec::with_capacity((len as usize/row_slice_size) + 1),
-            slice_size: row_slice_size
-        };
+                avg: 0,
+                min: 255,
+                max: 0,
+                deg: 0,
+                pos: y,
+                len,
+                values: vec![0 as u8; len as usize],
+                avg_loc : Vec::with_capacity((len as usize /row_slice_size) + 1),
+                min_loc : Vec::with_capacity((len as usize/row_slice_size) + 1),
+                max_loc : Vec::with_capacity((len as usize/row_slice_size) + 1),
+                slice_size: row_slice_size
+            };
         let mut slc = 0;
         let mut slice_vals = (255,0,0);
         for x in 0..len {
@@ -101,13 +102,26 @@ pub fn process_image_by_rows(img: &dyn PixelValue, dim: (u32,u32), color_channel
         let a = find_crossings_from_average(&line);
         let bar_code = find_bar_code(&line,&a);
         if bar_code.0[3] > 0 {
-            let mut add = true;
-            if found_bar_codes.len() > 0 {
-                add = !are_barcodes_same(&found_bar_codes.last().unwrap(),&bar_code);
-            }
-            if add {
-                println!("{:?}",bar_code);
-                found_bar_codes.push(bar_code);
+            //if full bar code
+            if bar_code.0[4] == 2 {
+                let mut add = true;
+                if found_bar_codes.len() > 0 {
+                    add = !are_barcodes_same(&found_bar_codes.last().unwrap(), &bar_code);
+                }
+                if add {
+                    found_bar_codes.push(bar_code);
+                }
+            } else {
+                if partial_bar_codes.len() > 0{
+                    let find_full = check_partial_bar_code(&mut partial_bar_codes, &found_bar_codes, &bar_code);
+                    match find_full {
+                        Some(code) =>  {
+                            found_bar_codes.push(code);
+                        },
+                        None => {}
+                    };
+                }
+                partial_bar_codes.push(bar_code);
             }
         }
         y += step;
@@ -115,6 +129,59 @@ pub fn process_image_by_rows(img: &dyn PixelValue, dim: (u32,u32), color_channel
 
     return found_bar_codes;
 }
+
+
+fn check_partial_bar_code(partial_bar_codes : &mut Vec<BarcodeBarArray>, full_codes : &Vec<BarcodeBarArray>,bar_code : &BarcodeBarArray) -> Option<BarcodeBarArray>{
+    let prev = partial_bar_codes.last().unwrap();
+    let len = (bar_code.0[3] - bar_code.0[2]) / 2;
+    let st = bar_code.0[0] - len;
+    if prev.0[0] >= st{
+        if prev.0[2] > bar_code.0[2]{
+            if prev.0[2] > bar_code.0[2] + len && prev.0[2] < bar_code.0[3] + len {
+                let new = (bar_code.0.clone(),bar_code.1.clone(),prev.1.clone());
+                return Some(new);
+            }
+        } else {
+            if bar_code.0[2] > prev.0[2] + len && bar_code.0[2] < prev.0[3] + len {
+                let new = (bar_code.0.clone(),prev.1.clone(),bar_code.1.clone());
+                return Some(new);
+            }
+        }
+    } else {
+        partial_bar_codes.truncate(0);
+    }
+    if  full_codes.len() > 0 {
+        let prev = full_codes.last().unwrap();
+        if prev.0[0] >= st{
+            // Partial barcode starts before the full code.
+            if prev.0[2] > bar_code.0[2]{
+                if prev.0[2] < bar_code.0[2] + len && prev.0[2] < bar_code.0[3] + len {
+                    let new = (bar_code.0.clone(),bar_code.1.clone(),prev.1.clone());
+                    return Some(new);
+                }
+            } else {
+                let middle = prev.0[2]/2 + prev.0[3]/2;
+                // Partial barcode starts after the full code and before the middle part of full code.
+                if middle > bar_code.0[2]{
+                    return if middle < bar_code.0[2] + len {
+                        let new = (bar_code.0.clone(), prev.1.clone(), bar_code.1.clone());
+                        Some(new)
+                    } else {
+                        let new = (bar_code.0.clone(), bar_code.1.clone(), prev.2.clone());
+                        Some(new)
+                    }
+                } else {
+                    if middle + len > bar_code.0[2] {
+                        let new = (bar_code.0.clone(), prev.1.clone(), bar_code.1.clone());
+                        return Some(new);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 
 fn calculate_row_step(y: u32) -> u32{
     let lnst = (y as f64).log10();
@@ -142,98 +209,166 @@ fn find_crossings_from_average(v: &ColorLine) -> (bool,Vec<usize>){
     let mut c_arr: (bool,Vec<usize>) = (true,Vec::new());
     let mut cur= true;
     let mut cur_loc = 0;
-    let cur_stat = (v.min_loc[cur_loc],v.max_loc[cur_loc],v.avg_loc[cur_loc]);
+    let cur_stat = (v.min_loc[cur_loc],v.max_loc[cur_loc],v.avg_loc[cur_loc] / 2 + (v.min_loc[cur_loc] / 2 + v.max_loc[cur_loc] / 2)/2);
     if v.values[0] < cur_stat.2 {
         c_arr.0 = false;
         cur = true;
     }
     let buf = max(3,((cur_stat.1 -cur_stat.0) as f32 * 0.04) as u8);
-    let mut range = [cur_stat.2.saturating_sub(buf),cur_stat.2.saturating_add(buf)];
+    let mut range = (cur_stat.2.saturating_sub(buf),cur_stat.2.saturating_add(buf),0);
 
-    let mut num = 0;
     let mut slc = v.slice_size/2;
-    for col in &v.values{
+    let mut num = 0;
+    if v.max_loc[cur_loc] - v.min_loc[cur_loc] < 16 {
+        range = find_range_buffer(cur_loc,v);
+        cur_loc = range.2;
+        num = slc + v.slice_size * (cur_loc-1);
+        slc = 0;
+    }
+
+
+    let mut buf_buffer = (0,cur);
+    let mut col;
+    while num < v.values.len(){
+        col = &v.values[num];
         if cur == true {
-            if *col < range[0] {
+            if *col < range.0 {
                 cur = false;
-                c_arr.1.push(num)
+                c_arr.1.push(num);
+                buf_buffer = (0,false);
+            } else {
+                compare_row_value_with_buffer(*col,range.1, num, &mut buf_buffer, &mut c_arr);
             }
         } else {
-            if *col > range[1] {
+            if *col > range.1 {
                 cur = true;
-                c_arr.1.push(num)
+                c_arr.1.push(num);
+                buf_buffer = (0,true);
+            } else {
+                compare_row_value_with_buffer(range.0,*col, num, &mut buf_buffer, &mut c_arr);
             }
         }
         num += 1;
         slc += 1;
         if slc >= v.slice_size {
             range = find_range_buffer(cur_loc,v);
-            cur_loc += 1;
+            let diff = range.2 - cur_loc;
+            if diff > 1 {
+                num = num + v.slice_size * diff;
+            }
+            cur_loc = range.2;
             slc = 0;
         }
     }
     return c_arr;
 }
 
-fn find_range_buffer(cur: usize,v: &ColorLine) -> [u8;2]{
-    let next = cur + 1;
+fn compare_row_value_with_buffer(val1:u8,val2:u8, num : usize,buf_buffer : &mut (usize,bool),c_arr : &mut (bool,Vec<usize>)){
+    if val1 <= val2 {
+        buf_buffer.0 += 1;
+    } else {
+        if buf_buffer.1 == true && buf_buffer.0 > 3 {
+            c_arr.1.push(num - buf_buffer.0);
+            c_arr.1.push(num);
+        }
+        buf_buffer.0 = 0;
+        buf_buffer.1 = true;
+    }
+}
+
+fn find_range_buffer(mut cur: usize,v: &ColorLine) -> (u8,u8,usize){
+    let mut next = cur+1;
     let len = v.max_loc.len();
-    let avg : u8;
-    let mx : u8;
-    let mn : u8;
-    if next < len{
+    let mut avg : u8 = 0;
+    let mut mx : u8 = 0;
+    let mut mn : u8 = 0;
+    while next < len{
         mx = max(v.max_loc[cur],v.max_loc[next]);
         mn = min(v.min_loc[cur],v.min_loc[next]);
-
+        if mx - mn < 16 {
+            cur += 1;
+            next = cur + 1;
+            continue;
+        }
         if next != len-1 {
             avg = v.avg_loc[cur] / 2 + v.avg_loc[next] / 2;
         } else {
             let rem = v.values.len() % v.slice_size;
             avg = ((v.avg_loc[cur] as usize * v.slice_size + v.avg_loc[next] as usize * rem) / (v.slice_size + rem)) as u8;
         }
-    } else {
+        break;
+    }
+    if next == len{
         mn = v.min_loc[cur];
         mx = v.max_loc[cur];
         avg = v.avg_loc[cur];
     }
+    avg = ((avg as u32 + (mx as u32 + mn as u32)/2) / 2) as u8;
+
     let buf = max(3,((mx -mn) as f32 * 0.04) as u8);
-    let range = [avg.saturating_sub(buf),avg.saturating_add(buf)];
+    let range = (avg.saturating_sub(buf),avg.saturating_add(buf),next);
     return range;
 }
 
 fn find_bar_code(color_line: &ColorLine, avg_cross : &(bool,Vec<usize>)) -> BarcodeBarArray{
 
-    let mut bar_code_widths : BarcodeBarArray = ([0;4],[[0;4];6],[[0;4];6]);
-    if avg_cross.1.len() >= 58{
-        let mut diffs : Vec<usize> = Vec::with_capacity(avg_cross.1.len()-1);
+    let mut bar_code_widths : BarcodeBarArray = ([0;5],[[0;4];6],[[0;4];6]);
+    let c_len = avg_cross.1.len();
+    if c_len >= 32{
+        let mut diffs : Vec<usize> = Vec::with_capacity(c_len-1);
         let mut f = 0;
         let mut t = 1;
-        while t < avg_cross.1.len(){
+        let mut counts = (0,0);
+        while t < c_len{
             let diff = avg_cross.1[t] - avg_cross.1[f];
             diffs.push(diff);
+            if avg_cross.1[f] > 200{
+                counts.1 += 1;
+            } else {
+                counts.0 += 1;
+            }
             t += 1;
             f += 1;
         }
         let mut light = avg_cross.0;
-        for t in 2..(avg_cross.1.len()-57) {
+        for t in 2..(c_len-31) {
             light = !light;
             let f = t-2;
-            let rangechange = (diffs[f] as f32 * 0.1) as usize + 2;
+            let rangechange = (diffs[f] as f32 * 0.12) as usize + 2;
             let range = (max(rangechange+1,diffs[f])-rangechange,diffs[f]+rangechange);
-            if diffs[t] >= range.0 && diffs[t] <=  range.1{
+            let mut rangem = range.clone();
+            if rangechange > 2 {
+                rangem.1 += 2;
+            }
+            if diffs[t] >= rangem.0 && diffs[t] <=  rangem.1{
                 if diffs[f+1] >= range.0 && diffs[f+1] <=  range.1{
-                    if has_bar_code_middle_and_end(&diffs,t,&range) {
-                        let ulen = find_unit_len(avg_cross.1[f], avg_cross.1[t+1], &color_line.values,light);
-                        bar_code_widths.1 = parse_barcode_section(t+1, &diffs, ulen, color_line, avg_cross);
-                        if bar_code_widths.1[5][0] == 0 {
-                            continue;
+                    let m_e = has_bar_code_middle_and_end(&diffs,t,&range,c_len - t);
+                    if m_e.0 {
+                        if m_e.1 {
+                            let ulen = find_unit_len(avg_cross.1[f], avg_cross.1[t + 1], &color_line.values, light);
+                            bar_code_widths.1 = parse_barcode_section(t + 1, &diffs, ulen, color_line, avg_cross);
+                            if bar_code_widths.1[5][0] == 0 {
+                                continue;
+                            }
+                            bar_code_widths.2 = parse_barcode_section(t + 30, &diffs, ulen, color_line, avg_cross);
+                            if bar_code_widths.2[5][0] == 0 {
+                                continue;
+                            }
+                            bar_code_widths.0 = [color_line.pos as usize, color_line.deg as usize, avg_cross.1[f], avg_cross.1[t + 55],2];
+                            return bar_code_widths;
+                        } else {
+                            let mut pos = t;
+                            if m_e.2 {
+                                pos = t+1;
+                            }
+                            let ulen = find_unit_len(avg_cross.1[f], avg_cross.1[t + 1], &color_line.values, light);
+                            let part = parse_barcode_section(pos + 1, &diffs, ulen, color_line, avg_cross);
+                            if part[5][0] == 0 {
+                                continue;
+                            }
+                            bar_code_widths.1 = part;
+                            bar_code_widths.0 = [color_line.pos as usize, color_line.deg as usize, avg_cross.1[f], avg_cross.1[t + 29],1];
                         }
-                        bar_code_widths.2 = parse_barcode_section(t+30, &diffs, ulen, color_line, avg_cross);
-                        if bar_code_widths.2[5][0] == 0 {
-                            continue;
-                        }
-                        bar_code_widths.0 = [color_line.pos as usize, color_line.deg as usize, avg_cross.1[f],avg_cross.1[t+55]];
-                        return bar_code_widths;
                     }
                 }
             }
@@ -242,13 +377,22 @@ fn find_bar_code(color_line: &ColorLine, avg_cross : &(bool,Vec<usize>)) -> Barc
     return bar_code_widths;
 }
 
-fn has_bar_code_middle_and_end(diffs: &Vec<usize>,t: usize, range: &(usize,usize)) -> bool {
+fn has_bar_code_middle_and_end(diffs: &Vec<usize>,t: usize, range: &(usize,usize), clen: usize) -> (bool,bool,bool) {
     let middle = &diffs[t+25..t+30];
     let mut has_middle = true;
-    for m in middle{
-        if *m < range.0 || *m > range.1{
+    for m in 0..middle.len()-1{
+        let elem = middle[m];
+        if elem < range.0 || elem > range.1{
             has_middle = false;
         }
+    }
+    let elem = middle.last().unwrap();
+    if clen < 58 || !has_middle{
+        return (has_middle,false,*elem < range.0 || *elem > range.1);
+    }
+
+    if *elem < range.0 || *elem > range.1{
+        return (false,false,false);
     }
     let end = &diffs[t+54..t+57];
     let mut has_end = true;
@@ -257,7 +401,7 @@ fn has_bar_code_middle_and_end(diffs: &Vec<usize>,t: usize, range: &(usize,usize
             has_end = false;
         }
     }
-    return has_middle && has_end;
+    return (has_middle,has_end,true);
 }
 
 fn parse_barcode_section(mut r:usize, diffs: &Vec<usize>, ulen:f32, color_line: &ColorLine, avg_cross : &(bool,Vec<usize>)) -> [[u8; 4]; 6] {
@@ -442,32 +586,32 @@ fn find_unit_len(start: usize, end: usize, row: &Vec<u8>,is_inverted:bool) -> f3
     if is_inverted {
         sides = ((max - nums[0]) as f32 / diff,(max - *nums.last().unwrap()) as f32 / diff);
         if start>0 && row[start-1] < max && end-start>6{
-            sides.0 = sides.0 - (max - row[start-1]) as f32 / diff;
+            sides.0 = sides.0 - (max.saturating_sub(row[start-1])) as f32 / diff;
         } else {
             sides.0 = sides.0/2.2;
             sides.1 = sides.1/2.2;
             if start>0 {
-                if (row[start-1]-min) as f32 / diff < 0.06 {
+                if (row[start-1].saturating_sub(min)) as f32 / diff < 0.06 {
                     sides.0 = 0.0;
                 }
             }
-            if (row[end+1]-min) as f32 / diff < 0.06 {
+            if (row[end+1].saturating_sub(min)) as f32 / diff < 0.06 {
                 sides.1 = 0.0;
             }
         }
     } else {
         sides = ((nums[0]-min) as f32 / diff,(nums.last().unwrap()-min) as f32 / diff);
         if start>0 && row[start-1] > min && end-start>6{
-            sides.0 = sides.0 - (row[start-1]-min) as f32 / diff;
+            sides.0 = sides.0 - (row[start-1].saturating_sub(min)) as f32 / diff;
         } else {
             sides.0 = sides.0/2.2;
             sides.1 = sides.1/2.2;
             if start>0 {
-                if (row[start-1]-min) as f32 / diff > 0.94 {
+                if (row[start-1].saturating_sub(min)) as f32 / diff > 0.94 {
                     sides.0 = 0.0;
                 }
             }
-            if (row[end+1]-min) as f32 / diff > 0.94 {
+            if (row[end+1].saturating_sub(min)) as f32 / diff > 0.94 {
                 sides.1 = 0.0;
             }
         }
