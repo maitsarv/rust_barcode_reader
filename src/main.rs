@@ -5,6 +5,7 @@ use std::time::Instant;
 
 mod barcode_detector;
 mod barcode_translate;
+mod color_line_helpers;
 
 type BarcodeBarArray = ([usize; 5], [[u8; 4]; 6], [[u8; 4]; 6]);
 
