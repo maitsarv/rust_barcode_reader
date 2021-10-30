@@ -17,7 +17,7 @@ pub struct ColorLine {
     pub slice_size: usize
 }
 
-fn find_crossings_from_average(v: &ColorLine, big_image: bool) -> (bool, Vec<usize>){
+pub fn find_crossings_from_average(v: &ColorLine, big_image: bool) -> (bool, Vec<usize>){
 
     let mut c_arr: (bool,Vec<usize>) = (true,Vec::new());
     let mut cur= true;

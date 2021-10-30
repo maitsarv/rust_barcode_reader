@@ -1,6 +1,7 @@
 use std::cmp::max;
 use std::cmp::min;
 use crate::BarcodeBarArray;
+use crate::color_line_helpers::{find_crossings_from_average, ColorLine};
 
 
 /**Implement PixelValue for the image data source.
