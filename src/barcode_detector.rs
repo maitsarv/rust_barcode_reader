@@ -1,5 +1,4 @@
 use std::cmp::max;
-use std::cmp::min;
 use crate::BarcodeBarArray;
 use crate::color_line_helpers::{find_crossings_from_average, ColorLine};
 
@@ -26,7 +25,7 @@ pub fn process_image_by_rows(img: &dyn PixelValue, dim: (u32,u32), color_channel
     println!("Dimensions {} X {} STEP: {}", dim.0, dim.1, step);
     let mut y = 0;
 
-    let row_slice_size = max(30, max(dim.0, dim.1) / 30) as usize;
+    let row_slice_size = max(30, max(dim.0, dim.1) / 40) as usize;
     let big_image = row_slice_size > 40;
 
     let mut found_bar_codes : Vec<BarcodeBarArray> = Vec::new();
@@ -86,7 +85,7 @@ pub fn process_image_by_rows(img: &dyn PixelValue, dim: (u32,u32), color_channel
 
         line.avg = (line_sum / (len) as usize) as u8;
         let a = find_crossings_from_average(&line, big_image);
-        let bar_code = find_bar_code(&line,&a);
+        let bar_code = find_bar_code(&line,&a, big_image);
         if bar_code.0[3] > 0 {
             //if full bar code
             if bar_code.0[4] == 2 {
@@ -190,7 +189,7 @@ fn are_barcodes_same(a : &BarcodeBarArray, b : &BarcodeBarArray) -> bool{
     true
 }
 
-fn find_bar_code(color_line: &ColorLine, avg_cross : &(bool,Vec<usize>)) -> BarcodeBarArray{
+fn find_bar_code(color_line: &ColorLine, avg_cross : &(bool,Vec<usize>), big_image: bool) -> BarcodeBarArray{
 
     let mut bar_code_widths : BarcodeBarArray = ([0;5],[[0;4];6],[[0;4];6]);
     let mut partial_barcodes : Vec<BarcodeBarArray> = Vec::new();
@@ -209,15 +208,15 @@ fn find_bar_code(color_line: &ColorLine, avg_cross : &(bool,Vec<usize>)) -> Barc
         for t in 2..(c_len-31) {
             light = !light;
             let f = t-2;
-            let rangechange = (diffs[f] as f32 * 0.12) as usize + 2;
+            let rangechange = (diffs[f] as f32 * 0.12) as usize + (if big_image {4} else {2});
             let range = (max(rangechange+1,diffs[f])-rangechange,diffs[f]+rangechange);
             let mut rangem = range.clone();
             if rangechange > 2 {
                 rangem.1 += 2;
             }
-            if diffs[t] >= rangem.0 && diffs[t] <=  rangem.1{
-                if diffs[f+1] >= range.0 && diffs[f+1] <=  range.1{
-                    let m_e = has_bar_code_middle_and_end(&diffs,t,&range);
+            if diffs[t] >= range.0 && diffs[t] <=  range.1{
+                if diffs[f+1] >= rangem.0 && diffs[f+1] <=  rangem.1{
+                    let m_e = has_bar_code_middle_and_end(&diffs,t,&range, &rangem);
                     if m_e.0 {
                         if m_e.1 {
                             let ulen = find_unit_len(avg_cross.1[f], avg_cross.1[t + 1], &color_line.values, light);
@@ -280,7 +279,12 @@ fn combine_row_barcode_parts(partial_barcodes: Vec<BarcodeBarArray>) -> Option<B
 }
 
 
-fn has_bar_code_middle_and_end(diffs: &Vec<usize>,t: usize, range: &(usize,usize)) -> (bool,bool,bool) {
+fn has_bar_code_middle_and_end (
+    diffs: &Vec<usize>,
+    t: usize,
+    range: &(usize,usize),
+    rangem:  &(usize,usize)) -> (bool,bool,bool
+) {
     let middle = &diffs[t+25..t+30];
     let mut has_middle = true;
     let first = middle.first().unwrap();
@@ -292,7 +296,7 @@ fn has_bar_code_middle_and_end(diffs: &Vec<usize>,t: usize, range: &(usize,usize
         }
     }
     let elem = middle.last().unwrap();
-    let has_sides = *elem >= range.0 && *elem <= range.1 && *first >= range.0 && *first <= range.1;
+    let has_sides = *elem >= rangem.0 && *elem <= rangem.1 && *first >= rangem.0 && *first <= rangem.1;
     if has_middle && !has_sides {
         return (has_middle, false, true);
     }

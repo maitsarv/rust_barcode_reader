@@ -36,9 +36,9 @@ pub fn find_crossings_from_average(v: &ColorLine, big_image: bool) -> (bool, Vec
         range = find_range_buffer(cur_loc,v);
         cur_loc = range.2;
         num = slc + v.slice_size * (cur_loc-1);
-        slc = 0;
     }
 
+    let in_buffer_max_len = if (big_image) {7} else {3};
 
     let mut buf_buffer = (0,cur);
     let mut col;
@@ -54,7 +54,7 @@ pub fn find_crossings_from_average(v: &ColorLine, big_image: bool) -> (bool, Vec
                 }
                 buf_buffer = (0,false);
             } else {
-                compare_row_value_with_buffer(*col,range.1, num, &mut buf_buffer, &mut c_arr);
+                compare_row_value_with_buffer(*col,range.1, num, &mut buf_buffer, &mut c_arr, in_buffer_max_len);
             }
         } else {
             if *col > range.1 {
@@ -66,7 +66,7 @@ pub fn find_crossings_from_average(v: &ColorLine, big_image: bool) -> (bool, Vec
                 }
                 buf_buffer = (0,true);
             } else {
-                compare_row_value_with_buffer(range.0,*col, num, &mut buf_buffer, &mut c_arr);
+                compare_row_value_with_buffer(range.0,*col, num, &mut buf_buffer, &mut c_arr, in_buffer_max_len);
             }
         }
         num += 1;
@@ -84,11 +84,18 @@ pub fn find_crossings_from_average(v: &ColorLine, big_image: bool) -> (bool, Vec
     return c_arr;
 }
 
-fn compare_row_value_with_buffer(val1:u8,val2:u8, num : usize,buf_buffer : &mut (usize,bool),c_arr : &mut (bool,Vec<usize>)){
+fn compare_row_value_with_buffer(
+    val1 : u8,
+    val2 : u8,
+    num : usize,
+    buf_buffer : &mut (usize,bool),
+    c_arr : &mut (bool,Vec<usize>),
+    in_buffer_max_len : usize
+){
     if val1 <= val2 {
         buf_buffer.0 += 1;
     } else {
-        if buf_buffer.1 == true && buf_buffer.0 > 3 {
+        if buf_buffer.1 == true && buf_buffer.0 > in_buffer_max_len {
             c_arr.1.push(num - buf_buffer.0);
             c_arr.1.push(num);
         }
