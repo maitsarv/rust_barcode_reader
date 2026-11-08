@@ -8,7 +8,6 @@ pub struct ColorLine {
     pub min: u8,
     pub max: u8,
     pub deg: u16,
-    pub len: u32,
     pub pos: u32,
     pub values: Vec<u8>,
     pub avg_loc: Vec<u8>,
@@ -38,7 +37,7 @@ pub fn find_crossings_from_average(v: &ColorLine, big_image: bool) -> (bool, Vec
         num = slc + v.slice_size * (cur_loc-1);
     }
 
-    let in_buffer_max_len = if (big_image) {7} else {3};
+    let in_buffer_max_len = if big_image {7} else {3};
 
     let mut buf_buffer = (0,cur);
     let mut col;
