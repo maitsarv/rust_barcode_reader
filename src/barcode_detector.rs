@@ -4,13 +4,11 @@ use crate::color_line_helpers::{find_crossings_from_average, ColorLine};
 
 
 /**Implement PixelValue for the image data source.
-    x - pixel position on vertical axis
-    y - pixel position on horizontal axis
-    channel - color channel. red, green on blue.
-    w - width of the image
+    Fills the provided row buffer with the luminance values of one image row.
+    row - buffer with the length equal to the image width, filled by the implementation
 **/
 pub trait PixelValue {
-    fn get_pixel_value(&self, x: u32, y:u32, channel: usize, w:usize) -> u8;
+    fn get_row_values(&self, y: u32, row: &mut [u8]);
 }
 
 /**
@@ -18,11 +16,9 @@ Detects and parses barcode(s) from images.
 Parameters:
 img - object with type that has implemented PixelValue trait.
 dim - width and height of the image
-color_channel - color channel number that is provided to get_pixel_value()
 **/
-pub fn process_image_by_rows(img: &dyn PixelValue, dim: (u32,u32), color_channel: usize) -> Vec<BarcodeBarArray> {
-    let step = calculate_row_step(dim.1);
-    println!("Dimensions {} X {} STEP: {}", dim.0, dim.1, step);
+pub fn process_image_by_rows(img: &dyn PixelValue, dim: (u32,u32)) -> Vec<BarcodeBarArray> {
+    let step = max(1, calculate_row_step(dim.1));
     let mut y = 0;
 
     let row_slice_size = max(30, max(dim.0, dim.1) / 40) as usize;
@@ -31,27 +27,37 @@ pub fn process_image_by_rows(img: &dyn PixelValue, dim: (u32,u32), color_channel
     let mut found_bar_codes : Vec<BarcodeBarArray> = Vec::new();
     let mut partial_bar_codes : Vec<BarcodeBarArray> = Vec::new();
 
+    let len = dim.0 as usize;
+    let mut row_buf = vec![0 as u8; len];
+    let mut line = ColorLine {
+            avg: 0,
+            min: 255,
+            max: 0,
+            deg: 0,
+            pos: 0,
+            values: vec![0 as u8; len],
+            avg_loc : Vec::with_capacity((len / row_slice_size) + 1),
+            min_loc : Vec::with_capacity((len / row_slice_size) + 1),
+            max_loc : Vec::with_capacity((len / row_slice_size) + 1),
+            slice_size: row_slice_size
+        };
+
     while y < dim.1 {
-        let len = dim.0;
+        img.get_row_values(y, &mut row_buf);
+        line.avg = 0;
+        line.min = 255;
+        line.max = 0;
+        line.deg = 0;
+        line.pos = y;
+        line.avg_loc.clear();
+        line.min_loc.clear();
+        line.max_loc.clear();
+        line.values.copy_from_slice(&row_buf);
         let mut line_sum = 0;
-        let mut line = ColorLine {
-                avg: 0,
-                min: 255,
-                max: 0,
-                deg: 0,
-                pos: y,
-                len,
-                values: vec![0 as u8; len as usize],
-                avg_loc : Vec::with_capacity((len as usize /row_slice_size) + 1),
-                min_loc : Vec::with_capacity((len as usize/row_slice_size) + 1),
-                max_loc : Vec::with_capacity((len as usize/row_slice_size) + 1),
-                slice_size: row_slice_size
-            };
         let mut slc = 0;
         let mut slice_vals = (255,0,0);
         for x in 0..len {
-            let px_code = img.get_pixel_value(x, y, color_channel,len as usize);
-            line.values[x as usize] = px_code;
+            let px_code = line.values[x];
             slice_vals.2 += px_code as usize;
             line_sum += px_code as usize;
             if slice_vals.0 > px_code {
@@ -83,7 +89,7 @@ pub fn process_image_by_rows(img: &dyn PixelValue, dim: (u32,u32), color_channel
             line.avg_loc.push((slice_vals.2 / slc as usize) as u8);
         }
 
-        line.avg = (line_sum / (len) as usize) as u8;
+        line.avg = (line_sum / len) as u8;
         let a = find_crossings_from_average(&line, big_image);
         let bar_code = find_bar_code(&line,&a, big_image);
         if bar_code.0[3] > 0 {
@@ -505,7 +511,7 @@ fn find_unit_len(start: usize, end: usize, row: &Vec<u8>,is_inverted:bool) -> f3
                     sides.0 = 0.0;
                 }
             }
-            if (row[end+1].saturating_sub(min)) as f32 / diff < 0.06 {
+            if end + 1 < row.len() && (row[end+1].saturating_sub(min)) as f32 / diff < 0.06 {
                 sides.1 = 0.0;
             }
         }
@@ -521,7 +527,7 @@ fn find_unit_len(start: usize, end: usize, row: &Vec<u8>,is_inverted:bool) -> f3
                     sides.0 = 0.0;
                 }
             }
-            if (row[end+1].saturating_sub(min)) as f32 / diff > 0.94 {
+            if end + 1 < row.len() && (row[end+1].saturating_sub(min)) as f32 / diff > 0.94 {
                 sides.1 = 0.0;
             }
         }
